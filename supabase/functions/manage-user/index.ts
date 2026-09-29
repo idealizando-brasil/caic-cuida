@@ -13,22 +13,36 @@ Deno.serve(async(req:Request)=>{
   if(!token)return json({error:"Não autorizado"},401);
   const {data:{user}}=await admin.auth.getUser(token);
   if(!user)return json({error:"Sessão inválida"},401);
-  const {data:caller}=await admin.from("profiles").select("platform_admin").eq("id",user.id).single();
-  if(!caller?.platform_admin)return json({error:"Somente o administrador central pode gerenciar usuários"},403);
-
   const body=await req.json();
-  const {data:membership,error:membershipError}=await admin.from("school_memberships").select("id,user_id,school_id").eq("id",body.membership_id).eq("school_id",body.school_id).single();
+  const schoolId=String(body.school_id||"");
+  const [{data:callerProfile},{data:callerMembership}]=await Promise.all([
+   admin.from("profiles").select("platform_admin").eq("id",user.id).single(),
+   admin.from("school_memberships").select("role,active").eq("user_id",user.id).eq("school_id",schoolId).maybeSingle()
+  ]);
+  const isPlatformAdmin=Boolean(callerProfile?.platform_admin);
+  const isSchoolDirector=callerMembership?.active===true&&callerMembership.role==="director";
+  if(!isPlatformAdmin&&!isSchoolDirector)return json({error:"Somente a Direção da escola ou o Administrador da Matriz pode gerenciar usuários"},403);
+
+  const {data:membership,error:membershipError}=await admin.from("school_memberships").select("id,user_id,school_id,role,active").eq("id",body.membership_id).eq("school_id",schoolId).single();
   if(membershipError||!membership)throw new Error("Usuário não encontrado nesta escola");
+  const {data:targetProfile}=await admin.from("profiles").select("platform_admin").eq("id",membership.user_id).single();
+  if(targetProfile?.platform_admin)throw new Error("A conta do Administrador da Matriz é protegida");
+  if(membership.user_id===user.id)throw new Error("Você não pode alterar ou excluir a própria conta");
+
+  async function ensureAnotherDirector(){
+   const {count}=await admin.from("school_memberships").select("id",{count:"exact",head:true}).eq("school_id",schoolId).eq("role","director").eq("active",true).neq("id",membership.id);
+   if((count||0)===0)throw new Error("A escola precisa manter pelo menos uma conta de Direção ativa");
+  }
 
   if(body.action==="delete"){
-   if(membership.user_id===user.id)throw new Error("A conta administrativa não pode excluir a si própria");
-   const {error:deleteMembershipError}=await admin.from("school_memberships").delete().eq("id",membership.id);
-   if(deleteMembershipError)throw deleteMembershipError;
+   if(membership.role==="director"&&membership.active)await ensureAnotherDirector();
    const {count}=await admin.from("school_memberships").select("id",{count:"exact",head:true}).eq("user_id",membership.user_id);
-   if((count||0)===0){
-    await admin.from("profiles").delete().eq("id",membership.user_id);
+   if((count||0)<=1){
     const {error:deleteUserError}=await admin.auth.admin.deleteUser(membership.user_id);
     if(deleteUserError)throw deleteUserError;
+   }else{
+    const {error:deleteMembershipError}=await admin.from("school_memberships").delete().eq("id",membership.id);
+    if(deleteMembershipError)throw deleteMembershipError;
    }
    return json({success:true});
   }
@@ -37,6 +51,7 @@ Deno.serve(async(req:Request)=>{
    const fullName=String(body.full_name||"").trim();
    const email=String(body.email||"").trim().toLowerCase();
    if(!fullName||!email||!allowedRoles.includes(body.role))throw new Error("Preencha nome, e-mail e função corretamente");
+   if(membership.role==="director"&&membership.active&&body.role!=="director")await ensureAnotherDirector();
    const {error:authError}=await admin.auth.admin.updateUserById(membership.user_id,{email,email_confirm:true});
    if(authError)throw authError;
    const {error:profileError}=await admin.from("profiles").update({full_name:fullName,email}).eq("id",membership.user_id);

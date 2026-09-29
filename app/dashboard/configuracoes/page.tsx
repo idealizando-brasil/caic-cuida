@@ -9,7 +9,7 @@ import "./settings.css";
 
 type School={id:string;name:string;city:string|null;state:string|null};
 type ClassRow={id:string;name:string;school_year:number};
-type Member={id:string;user_id:string;role:string;profiles:{full_name:string|null;email:string}|null};
+type Member={id:string;user_id:string;role:string;profiles:{full_name:string|null;email:string;platform_admin:boolean}|null};
 const roles=[["director","Direção"],["coordinator","Coordenação"],["psychologist","Psicologia"],["social_worker","Serviço Social"],["teacher","Professor(a)"],["school_admin","Administrador(a)"]] as const;
 
 export default function Configuracoes(){
@@ -24,6 +24,7 @@ export default function Configuracoes(){
  const [busy,setBusy]=useState(false);
  const [platformAdmin,setPlatformAdmin]=useState(false);
  const [currentRole,setCurrentRole]=useState<string|null>(null);
+ const [currentUserId,setCurrentUserId]=useState("");
  const [editing,setEditing]=useState<Member|null>(null);
  const [className,setClassName]=useState("");
  const [year,setYear]=useState(2026);
@@ -34,6 +35,7 @@ export default function Configuracoes(){
  const load=useCallback(async()=>{
   const {data:{user}}=await supabase.auth.getUser();
   if(!user){router.replace("/login");return}
+  setCurrentUserId(user.id);
   setEmail(user.email||"");
   const [{data:membership},{data:profile}]=await Promise.all([
    supabase.from("school_memberships").select("school_id,role,schools(id,name,city,state)").eq("user_id",user.id).limit(1).single(),
@@ -47,7 +49,7 @@ export default function Configuracoes(){
   setSchool(current);
   const [{data:c},{data:m}]=await Promise.all([
    supabase.from("classes").select("id,name,school_year").eq("school_id",current.id).order("name"),
-   supabase.from("school_memberships").select("id,user_id,role,profiles(full_name,email)").eq("school_id",current.id).order("role")
+   supabase.from("school_memberships").select("id,user_id,role,profiles(full_name,email,platform_admin)").eq("school_id",current.id).order("role")
   ]);
   setClasses((c||[]) as ClassRow[]);
   setMembers((m||[]) as unknown as Member[]);
@@ -61,6 +63,8 @@ export default function Configuracoes(){
  }
  const canManageSchool=currentRole==="director";
  const canManageClasses=canManageSchool;
+ const canManageTeam=platformAdmin||currentRole==="director";
+ const canManageMember=(member:Member)=>canManageTeam&&member.user_id!==currentUserId&&!member.profiles?.platform_admin;
 
  async function addClass(e:FormEvent){
   e.preventDefault();if(!school||!canManageClasses||!className.trim())return;setBusy(true);
@@ -82,13 +86,13 @@ export default function Configuracoes(){
   if(!error){setInviteEmail("");setFullName("");await load()}setBusy(false);
  }
  async function updateMember(e:FormEvent){
-  e.preventDefault();if(!school||!editing?.profiles)return;setBusy(true);setMessage("");
+  e.preventDefault();if(!school||!editing?.profiles||!canManageMember(editing))return;setBusy(true);setMessage("");
   const {error}=await supabase.functions.invoke("manage-user",{body:{action:"update",membership_id:editing.id,school_id:school.id,full_name:editing.profiles.full_name,email:editing.profiles.email,role:editing.role}});
   setMessage(error?"Não foi possível atualizar o usuário.":"Usuário atualizado com sucesso.");
   if(!error){setEditing(null);await load()}setBusy(false);
  }
  async function deleteMember(member:Member){
-  if(!school||!confirm(`Excluir completamente o acesso de ${member.profiles?.full_name||member.profiles?.email||"este usuário"}?`))return;
+  if(!school||!canManageMember(member)||!confirm(`Excluir completamente o acesso de ${member.profiles?.full_name||member.profiles?.email||"este usuário"}?`))return;
   setBusy(true);setMessage("");
   const {error}=await supabase.functions.invoke("manage-user",{body:{action:"delete",membership_id:member.id,school_id:school.id}});
   setMessage(error?"Não foi possível excluir o usuário.":"Usuário excluído com sucesso.");
@@ -115,12 +119,12 @@ export default function Configuracoes(){
   </div>}
   {tab==="equipe"&&<div className="settings-stack">
    {canManageSchool?<form className="card settings-card" onSubmit={invite}><h2>Convidar profissional</h2><p className="muted">A pessoa receberá um convite para criar o acesso.</p><div className="form-grid"><label>Nome completo<input value={fullName} onChange={e=>setFullName(e.target.value)} required/></label><label>E-mail<input type="email" value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} required/></label><label>Função<select value={role} onChange={e=>setRole(e.target.value)}>{roles.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label></div><div className="form-actions"><button disabled={busy}>Enviar convite</button></div></form>:<section className="card settings-card"><h2>Equipe cadastrada</h2><p className="muted">Somente a Direção pode enviar convites para novos usuários.</p></section>}
-   {editing?.profiles&&<form className="card settings-card" onSubmit={updateMember}>
+   {editing?.profiles&&canManageMember(editing)&&<form className="card settings-card" onSubmit={updateMember}>
     <div className="settings-title"><div><h2>Editar usuário</h2><p className="muted">Atualize os dados e a função deste profissional.</p></div><button type="button" className="icon-button" onClick={()=>setEditing(null)}><X/></button></div>
     <div className="form-grid"><label>Nome completo<input value={editing.profiles.full_name||""} onChange={e=>setEditing({...editing,profiles:{...editing.profiles!,full_name:e.target.value}})} required/></label><label>E-mail<input type="email" value={editing.profiles.email} onChange={e=>setEditing({...editing,profiles:{...editing.profiles!,email:e.target.value}})} required/></label><label>Função<select value={editing.role} onChange={e=>setEditing({...editing,role:e.target.value})}>{roles.map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label></div>
     <div className="form-actions"><button disabled={busy}>Salvar usuário</button></div>
    </form>}
-   <section className="card settings-card"><h2>Equipe cadastrada</h2><p className="muted">{platformAdmin?"O administrador central pode editar ou excluir acessos.":"Consulte o administrador central para alterar acessos."}</p><div className="data-list">{members.map(m=><div key={m.id}><span><b>{m.profiles?.full_name||"Usuário"}</b><small>{m.profiles?.email}</small></span><span className="member-actions"><em>{roles.find(r=>r[0]===m.role)?.[1]||"Administrador da matriz"}</em>{platformAdmin&&<><button className="icon-button" onClick={()=>setEditing(m)} title="Editar usuário"><Pencil/></button><button className="danger-icon" onClick={()=>deleteMember(m)} title="Excluir usuário"><Trash2/></button></>}</span></div>)}</div></section>
+   <section className="card settings-card"><h2>Equipe cadastrada</h2><p className="muted">{canManageTeam?"A Direção pode editar ou excluir profissionais da própria escola. A conta da matriz e a própria conta permanecem protegidas.":"Somente a Direção pode alterar os acessos da equipe."}</p><div className="data-list">{members.map(m=><div key={m.id}><span><b>{m.profiles?.full_name||"Usuário"}</b><small>{m.profiles?.email}</small></span><span className="member-actions"><em>{roles.find(r=>r[0]===m.role)?.[1]||"Administrador da matriz"}</em>{canManageMember(m)&&<><button className="icon-button" onClick={()=>setEditing(m)} title="Editar profissional"><Pencil/></button><button className="danger-icon" onClick={()=>deleteMember(m)} title="Excluir profissional"><Trash2/></button></>}</span></div>)}</div></section>
   </div>}
  </AppShell>;
 }
