@@ -36,14 +36,10 @@ Deno.serve(async(req:Request)=>{
 
   if(body.action==="delete"){
    if(membership.role==="director"&&membership.active)await ensureAnotherDirector();
-   const {count}=await admin.from("school_memberships").select("id",{count:"exact",head:true}).eq("user_id",membership.user_id);
-   if((count||0)<=1){
-    const {error:deleteUserError}=await admin.auth.admin.deleteUser(membership.user_id);
-    if(deleteUserError)throw deleteUserError;
-   }else{
-    const {error:deleteMembershipError}=await admin.from("school_memberships").delete().eq("id",membership.id);
-    if(deleteMembershipError)throw deleteMembershipError;
-   }
+   // Remove somente o vínculo com a escola. A conta e os registros históricos
+   // permanecem preservados para auditoria e para o futuro uso multiescolas.
+   const {error:deleteMembershipError}=await admin.from("school_memberships").delete().eq("id",membership.id).eq("school_id",schoolId);
+   if(deleteMembershipError)throw deleteMembershipError;
    return json({success:true});
   }
 
