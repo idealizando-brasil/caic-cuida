@@ -39,7 +39,7 @@ begin
 
   select monthly_price into plan_price
   from public.subscription_plans
-  where code = 'acolhe_mensal' and active;
+  where code = 'cuida_mensal' and active;
 
   if plan_price is null then
     raise exception 'Plano indisponível';
@@ -51,7 +51,7 @@ begin
   ) values (
     trim(p_school_name), nullif(trim(p_inep_code), ''), trim(p_contact_name),
     lower(trim(p_contact_email)), trim(p_contact_phone), trim(p_city),
-    upper(trim(p_state)), 'acolhe_mensal', plan_price
+    upper(trim(p_state)), 'cuida_mensal', plan_price
   ) returning id into application_id;
 
   return application_id;
@@ -60,4 +60,3 @@ $$;
 
 revoke all on function public.submit_school_application(text,text,text,text,text,text,text,text) from public;
 grant execute on function public.submit_school_application(text,text,text,text,text,text,text,text) to anon, authenticated;
-

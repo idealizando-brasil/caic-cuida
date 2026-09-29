@@ -105,7 +105,7 @@ create index subscription_payments_school_due_idx
 on public.subscription_payments(school_id, due_date desc);
 
 insert into public.subscription_plans(code, name, monthly_price)
-values ('acolhe_mensal', 'CAIC Acolhe Mensal', 49.90)
+values ('cuida_mensal', 'Sistema CUIDA Mensal', 49.90)
 on conflict (code) do update
 set name = excluded.name,
     monthly_price = excluded.monthly_price,
@@ -115,7 +115,7 @@ set name = excluded.name,
 insert into public.school_subscriptions(
   school_id, plan_code, monthly_price, status, started_at
 )
-select id, 'acolhe_mensal', 0, 'pilot', current_date
+select id, 'cuida_mensal', 0, 'pilot', current_date
 from public.schools
 where slug = 'caic'
 on conflict (school_id) do nothing;

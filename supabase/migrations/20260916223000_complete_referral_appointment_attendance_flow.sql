@@ -1,4 +1,4 @@
--- Fluxo oficial Acolhe: encaminhamento -> agenda -> atendimento -> retorno/conclusao
+-- Fluxo oficial CUIDA: encaminhamento -> agenda -> atendimento -> retorno/conclusao
 
 -- Metadados de agenda, cancelamento com aceite da gestao e retorno.
 alter table public.appointments add column if not exists appointment_type text not null default 'initial';
